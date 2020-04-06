@@ -384,6 +384,12 @@ namespace gr {
         for(uint32_t i = 0; i < num_symbols; i++) {
             transmit_chirp(true, conf.tap.channel.sf, symbols[i]);
         }
+
+        // Duty Cycle Downtime.
+        float seconds_downtime = 0.5;
+        uint32_t samples_downtime = seconds_downtime * d_samples_per_second;
+        std::vector<gr_complex> downtime_samples(samples_downtime, 0);
+        d_sample_buffer.insert(d_sample_buffer.end(), downtime_samples.begin(), downtime_samples.end());
     }
 
   } /* namespace lora */
