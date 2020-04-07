@@ -51,7 +51,7 @@ namespace gr {
         set_output_multiple(pow(2,16));
 
         // Initialize variables
-        d_osr = 8;
+        d_osr = 2;
         d_samples_per_second = 125000*d_osr;
         d_num_preamble_symbols = 8;
         d_bw = 125000;
