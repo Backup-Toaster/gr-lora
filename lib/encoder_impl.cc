@@ -98,40 +98,17 @@ namespace gr {
         const double f0 = -(d_bw / 2.0);
         double pre_dir = 2.0 * M_PI;
         double t = 0;
-        // std::vector<gr_complex> chirp_0(2*samples_per_symbol);
-        // chirp_0 = d_chirps[sf];
-        // std::cout << "chirp_0.size(): " << chirp_0.size() << std::endl;
 
         if(!up)
             pre_dir *= -1;
 
         std::vector<gr_complex> chirp(samples_per_symbol);
         double phase = 0;
-        // std::cout << "d_osr*symbol + 1u: " << d_osr*symbol + 1u << std::endl;
-        // std::cout << "(2*samples_per_symbol - 1) - d_osr*symbol - 1u: " << (2*samples_per_symbol - 1) - d_osr*symbol - 1u << std::endl;
-        // std::cout << "2*samples_per_symbol - d_osr*symbol: " << 2*samples_per_symbol - d_osr*symbol << std::endl;
-        // if (!up) {
-        //     for (uint32_t i = 0u; i < samples_per_symbol; i++) {
-        //         chirp[i] = chirp_0[d_osr*symbol + i];
-        //         // chirp[i] = chirp_0[(2*samples_per_symbol - 1) - d_osr*symbol - i];
-        //     }
-        // } 
-        // else {
-        //     for (uint32_t i = 0u; i < samples_per_symbol; i ++) {
-        //         chirp[i] = chirp_0[(2u*samples_per_symbol - 1u) - d_osr*symbol - i];
-        //     }
-        // }
-        
-
-        int32_t offset = 0;
-        for (uint32_t i = 0u; i < samples_per_symbol; i++) { // Original
-        // for (uint32_t i = 1u; i <= samples_per_symbol; i++) { // LT Edit - Shifted i up by one.
-        // t = d_dt * ((i + (d_osr * symbol)) % samples_per_symbol); // Original
-        t = d_dt * ((i + (d_osr * (symbol))) % samples_per_symbol); //LT Edit
-        phase = d_chirp_phi0 + (pre_dir * t * (f0 + T * t));
-        // chirp[i] = gr_expj(phase); //Original
-        chirp[(i - offset) % samples_per_symbol] = gr_expj(phase); // LT Edit
-        // std::cout << "i: " << i << ", t: " << t << ", phase: " << phase << ", chirp[i]: " << chirp[i - offset] << std::endl;
+   
+        for (uint32_t i = 0u; i < samples_per_symbol; i++) {
+            t = d_dt * ((i + (d_osr * symbol)) % samples_per_symbol);
+            phase = d_chirp_phi0 + (pre_dir * t * (f0 + T * t));
+            chirp[i] = gr_expj(phase);
         }
 
         // Add chirp to buffer
@@ -141,8 +118,7 @@ namespace gr {
             d_sample_buffer.insert(d_sample_buffer.end(), chirp.begin(), chirp.end());
 
         // Set phase
-        // d_chirp_phi0 = fmod(phase,(2 * M_PI)); // LT Edit
-        d_chirp_phi0 = phase; // Original
+        d_chirp_phi0 = phase;
     }
 
     /*
@@ -175,6 +151,7 @@ namespace gr {
     int encoder_impl::work(int noutput_items, gr_vector_const_void_star &input_items, gr_vector_void_star &output_items) {
         gr_complex* out = (gr_complex*)output_items[0];
 
+        // A bunch of test packets to use when testing. To Do - Change this interface to a UDP port, add all the TAP and PHY based on settings.
         // Temporary         ve  pa      le              fq  bw  sf  pr  mr  cr  sn  sy  H1  H1  H1
         // char test_pkt[] = "\x00\x00\x12\x00\x00\xa1\xbc\x33\x01\x08\x00\x00\x00\x00\x12\x17\x94\xa0\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x20\x21\x22\xb8\x73";
         // char test_pkt[] = "\x00\x00\x12\x00\x00\xa1\xbc\x33\x01\x07\x00\x00\x00\x00\x00\x01\x80\xa0\x0f";
@@ -268,8 +245,9 @@ namespace gr {
             symbols[symbol] = gray_decode(symbols[symbol]);
             if(reduced_rate)
                 symbols[symbol] <<= 2;
-            symbols[symbol] += 1; //LT Addition
-            symbols[symbol] %= 1u << (reduced_rate ? sf + 2 : sf); //LT Addition
+            // Symbols decoded at the receiver are off by one. Hence...
+            symbols[symbol] += 1; // Add 1 and...
+            symbols[symbol] %= 1u << (reduced_rate ? sf + 2 : sf); // ...modulo to prevent overflow.
             std::cout << "(" << (int)symbols[symbol] - 1 << "; " << (int)symbols[symbol] << "), ";
         }
         std::cout << std::endl;
@@ -285,7 +263,7 @@ namespace gr {
         }
     }
 
-    void encoder_impl::transmit_packet(loraconf_t& conf, uint8_t* packet) { // TODO: clean up
+    void encoder_impl::transmit_packet(loraconf_t& conf, uint8_t* packet) {
         uint32_t header_length = sizeof(loraphy_header_t);
         uint32_t payload_length = conf.phy.length + MAC_CRC_SIZE * conf.phy.has_mac_crc;
         uint32_t packet_length = header_length + payload_length;
@@ -298,26 +276,20 @@ namespace gr {
         uint32_t N = bytes_needed_payload_words;
         uint32_t K = conf.tap.channel.sf;
         uint32_t bytes_needed_payload_words_padded =  (((N + K) % K) == 0) ? N : (N + K) - (N + K) % K;
-        std::cout << "bytes_needed_payload_words_padded: " << bytes_needed_payload_words_padded << std::endl;
+        //std::cout << "bytes_needed_payload_words_padded: " << bytes_needed_payload_words_padded << std::endl;
 
         uint32_t num_bytes = bytes_needed_header_words - 1 + bytes_needed_payload_words_padded + (conf.tap.channel.sf - 7); // Minus one as the last codeword of the header is overwritten.
         // We add back in that (SF - 7) value to make sure we are counting all our bytes.
-        std::cout << "num_bytes: " << num_bytes << std::endl;
+        //std::cout << "num_bytes: " << num_bytes << std::endl;
 
         uint32_t num_symbols_header = 8; //Equal to cr + 4, the output length of the interleaving function, when header cr is always 4.
         uint32_t num_symbols_payload = bytes_needed_payload_words_padded / conf.tap.channel.sf * (4 + conf.phy.cr); // Comes from fact that sf payload codewords are read in to produce 4 + cr symbols.
 
         uint32_t num_symbols = num_symbols_header + num_symbols_payload;
-        std::cout << "num_symbols: " << num_symbols << std::endl;
-        // uint32_t packet_length = conf.phy.length + sizeof(loraphy_header_t) + conf.phy.has_mac_crc * MAC_CRC_SIZE; // LT: Will look to see if CRC is included. 
-        // uint32_t bits_needed_packet = 8 * packet_length;
-        // uint32_t bits_needed_words = bits_needed_packet*(conf.phy.cr + 4)/conf.phy.cr; //When CR != 4 this will need to be split out for header and payload.
-        // uint32_t num_symbols = std::ceil(bits_needed_words / conf.tap.channel.sf);
-        // uint32_t num_bytes = bits_needed_words / 8;
+        //std::cout << "num_symbols: " << num_symbols << std::endl;
 
         uint8_t encoded[num_bytes];
         memset(encoded, 0x00, num_bytes * sizeof(uint8_t)); // Set all symbols to zero so that zero symbols are transmitted if we don't use all the space.
-        // uint32_t num_symbols = num_bytes * ((4.0+conf.phy.cr) / conf.tap.channel.sf) + 0.5;
         uint32_t encoded_offset = 0;
         uint32_t packet_offset = 0;
 
@@ -333,17 +305,13 @@ namespace gr {
         }
 
         // Add sync words to queue
-        uint8_t sync_word = 0x12; // LT
-        // uint8_t sync_word = 0x12; // Original
-        // uint32_t sync_offset_1 = ((sync_word & 0xf0) >> 4) * pow(2, conf.tap.channel.sf) * d_osr / 32; // Original
-        // uint32_t sync_offset_2 = (sync_word & 0x0f) * pow(2, conf.tap.channel.sf) * d_osr / 32; // Original
-        uint32_t sync_offset_1 = 8 * ((sync_word & 0xf0) >> 4); // LT Edit
-        uint32_t sync_offset_2 = 8 * (sync_word & 0x0f); // LT Edit
-        std::cout << "sync_offset_1: " << int(sync_offset_1) << ", sync_offset_2: " << int(sync_offset_2) << std::endl;  // LT Edit
-        transmit_chirp(true, conf.tap.channel.sf, sync_offset_1); // Original
-        transmit_chirp(true, conf.tap.channel.sf, sync_offset_2); // Original
-        // transmit_chirp(true, conf.tap.channel.sf, 8); // LT Edit
-        // transmit_chirp(true, conf.tap.channel.sf, 16); // LT Edit
+        uint8_t sync_word = 0x12;
+        uint32_t sync_offset_1 = 8 * ((sync_word & 0xf0) >> 4);
+        uint32_t sync_offset_2 = 8 * (sync_word & 0x0f);
+        // std::cout << "sync_offset_1: " << int(sync_offset_1) << ", sync_offset_2: " << int(sync_offset_2) << std::endl;
+        transmit_chirp(true, conf.tap.channel.sf, sync_offset_1);
+        transmit_chirp(true, conf.tap.channel.sf, sync_offset_2);
+
 
         // Add SFD to queue
         transmit_chirp(false, conf.tap.channel.sf, 0);
@@ -354,8 +322,7 @@ namespace gr {
         if(d_explicit) {
             fec_encode(d_h48_fec, 3, packet, encoded); // Header is always 4/8
             packet_offset = 3;
-            // encoded_offset = 6; //LT
-            encoded_offset = 5; // Original
+            encoded_offset = 5;
         }
 
         // Add remaining blocks to queue
