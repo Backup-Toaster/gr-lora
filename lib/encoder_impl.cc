@@ -123,14 +123,14 @@ namespace gr {
         // }
         
 
-        uint32_t offset = 0u;
+        int32_t offset = 0;
         for (uint32_t i = 0u; i < samples_per_symbol; i++) { // Original
         // for (uint32_t i = 1u; i <= samples_per_symbol; i++) { // LT Edit - Shifted i up by one.
         // t = d_dt * ((i + (d_osr * symbol)) % samples_per_symbol); // Original
         t = d_dt * ((i + (d_osr * (symbol))) % samples_per_symbol); //LT Edit
         phase = d_chirp_phi0 + (pre_dir * t * (f0 + T * t));
-        chirp[i] = gr_expj(phase); //Original
-        chirp[i - offset] = gr_expj(phase); // LT Edit
+        // chirp[i] = gr_expj(phase); //Original
+        chirp[(i - offset) % samples_per_symbol] = gr_expj(phase); // LT Edit
         // std::cout << "i: " << i << ", t: " << t << ", phase: " << phase << ", chirp[i]: " << chirp[i - offset] << std::endl;
         }
 
@@ -141,7 +141,8 @@ namespace gr {
             d_sample_buffer.insert(d_sample_buffer.end(), chirp.begin(), chirp.end());
 
         // Set phase
-        d_chirp_phi0 = fmod(phase,(2 * M_PI));
+        // d_chirp_phi0 = fmod(phase,(2 * M_PI)); // LT Edit
+        d_chirp_phi0 = phase; // Original
     }
 
     /*
@@ -178,7 +179,7 @@ namespace gr {
         // char test_pkt[] = "\x00\x00\x12\x00\x00\xa1\xbc\x33\x01\x08\x00\x00\x00\x00\x12\x17\x94\xa0\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x20\x21\x22\xb8\x73";
         // char test_pkt[] = "\x00\x00\x12\x00\x00\xa1\xbc\x33\x01\x07\x00\x00\x00\x00\x00\x01\x80\xa0\x0f";
         // char test_pkt[] = "\x00\x00\x12\x00\x00\xa1\xbc\x33\x01\x0a\x00\x00\x00\x00\x00\x04\x80\xa0\xde\xad\xbe\xef";
-        char test_pkt[] = "\x00\x00\x12\x00\x00\xa1\xbc\x33\x01\x0a\x00\x00\x00\x00\x00\x12\x91\x60\x00\x00\x00\x00\x01\x50\x45\x52\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10\x11\xd4\xcc";
+        char test_pkt[] = "\x00\x00\x12\x00\x00\xa1\xbc\x33\x01\x07\x00\x00\x00\x00\x00\x12\x91\x60\x00\x00\x00\x00\x01\x50\x45\x52\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10\x11\xd4\xcc";
         // char test_pkt[] = "\x00\x00\x12\x00\x00\xa1\xbc\x33\x01\x08\x00\x00\x00\x00\x00\x08\x80\xa0\x0f\x0f\x0f\x0f\x0f\x0f\x0f\x0f";
         // char test_pkt[] = "\x00\x00\x12\x00\x00\xa1\xbc\x33\x01\x07\x00\x00\x00\x00\x12\x02\x91\xa0\x00\xff";
         // char test_pkt[] = "\x00\x00\x12\x00\x00\xa1\xbc\x33\x01\x07\x00\x00\x00\x00\x12\x17\x91\xa0\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
@@ -268,6 +269,7 @@ namespace gr {
             if(reduced_rate)
                 symbols[symbol] <<= 2;
             symbols[symbol] += 1; //LT Addition
+            symbols[symbol] %= 1u << (reduced_rate ? sf + 2 : sf); //LT Addition
             std::cout << "(" << (int)symbols[symbol] - 1 << "; " << (int)symbols[symbol] << "), ";
         }
         std::cout << std::endl;
@@ -319,18 +321,29 @@ namespace gr {
         uint32_t encoded_offset = 0;
         uint32_t packet_offset = 0;
 
+        // Duty Cycle Downtime.
+        float seconds_downtime = 0.5;
+        uint32_t samples_downtime = seconds_downtime * d_samples_per_second;
+        std::vector<gr_complex> downtime_samples(samples_downtime, 0);
+        d_sample_buffer.insert(d_sample_buffer.end(), downtime_samples.begin(), downtime_samples.end());
+
         // Add preamble symbols to queue
         for(uint32_t i = 0; i < d_num_preamble_symbols; i++) {
             transmit_chirp(true, conf.tap.channel.sf, 0);
         }
 
         // Add sync words to queue
-        uint8_t sync_word = 0x00; // LT
-        //uint8_t sync_word = 0x12; // Original
-        uint32_t sync_offset_1 = ((sync_word & 0xf0) >> 4) * pow(2, conf.tap.channel.sf) * d_osr / 32;
-        uint32_t sync_offset_2 = (sync_word & 0x0f) * pow(2, conf.tap.channel.sf) * d_osr / 32;
-        transmit_chirp(true, conf.tap.channel.sf, sync_offset_1);
-        transmit_chirp(true, conf.tap.channel.sf, sync_offset_2);
+        uint8_t sync_word = 0x12; // LT
+        // uint8_t sync_word = 0x12; // Original
+        // uint32_t sync_offset_1 = ((sync_word & 0xf0) >> 4) * pow(2, conf.tap.channel.sf) * d_osr / 32; // Original
+        // uint32_t sync_offset_2 = (sync_word & 0x0f) * pow(2, conf.tap.channel.sf) * d_osr / 32; // Original
+        uint32_t sync_offset_1 = 8 * ((sync_word & 0xf0) >> 4); // LT Edit
+        uint32_t sync_offset_2 = 8 * (sync_word & 0x0f); // LT Edit
+        std::cout << "sync_offset_1: " << int(sync_offset_1) << ", sync_offset_2: " << int(sync_offset_2) << std::endl;  // LT Edit
+        transmit_chirp(true, conf.tap.channel.sf, sync_offset_1); // Original
+        transmit_chirp(true, conf.tap.channel.sf, sync_offset_2); // Original
+        // transmit_chirp(true, conf.tap.channel.sf, 8); // LT Edit
+        // transmit_chirp(true, conf.tap.channel.sf, 16); // LT Edit
 
         // Add SFD to queue
         transmit_chirp(false, conf.tap.channel.sf, 0);
@@ -385,11 +398,7 @@ namespace gr {
             transmit_chirp(true, conf.tap.channel.sf, symbols[i]);
         }
 
-        // Duty Cycle Downtime.
-        float seconds_downtime = 0.5;
-        uint32_t samples_downtime = seconds_downtime * d_samples_per_second;
-        std::vector<gr_complex> downtime_samples(samples_downtime, 0);
-        d_sample_buffer.insert(d_sample_buffer.end(), downtime_samples.begin(), downtime_samples.end());
+
     }
 
   } /* namespace lora */
